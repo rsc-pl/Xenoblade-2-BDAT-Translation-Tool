@@ -108,7 +108,7 @@ Base Directory/
 ## 🔧 Technical Details
 
 ### JSON Structure
-The tool preserves the original JSON structure while adding translations:
+The tool preserves the original JSON structure, saving the name field where the original text is stored:
 ```json
 {
   "rows": [
@@ -116,8 +116,7 @@ The tool preserves the original JSON structure while adding translations:
       "$id": "1",
       "label": "example",
       "style": "0",
-      "name": "Original Text",
-      "edited_text": "Translated Text"
+      "name": "Text",
     }
   ]
 }
