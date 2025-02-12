@@ -6,12 +6,16 @@ import threading
 import shutil
 import configparser
 from tkinter import font
+import atexit
 
 # --- New Global Variables ---
 BASE_DIR = None
+SECOND_BASE_DIR = None  # For translated files
 CURRENT_JSON_PATH = None
+CURRENT_ORIGINAL_JSON_PATH = None  # Path to original language file
 FOLDER_STATUS = {}  # Dictionary to store folder status (color)
 CURRENT_JSON_DATA = None
+CURRENT_ORIGINAL_JSON_DATA = None  # Original language data
 TREE = None  # global tree variable
 UNSAVED_CHANGES = False
 
@@ -52,43 +56,49 @@ def calculate_text_height(text, font, width):
     text_widget.destroy()
     return height + 10  # Add extra padding to make rows taller
 
-def populate_table(tree, data):
-    """Populates the Treeview table with JSON data."""
+def populate_table(tree, original_data, translated_data):
+    """Populates the Treeview table with JSON data from both original and translated files."""
     # Clear existing data
     for item in tree.get_children():
         tree.delete(item)
 
+    def format_text(text):
+        if not text:
+            return ""
+        # Replace special characters with visible representations
+        text = text.replace('\n', '\\n').replace('\t', '\\t').replace('\r', '\\r')
+        # Handle square brackets by adding spaces around them for better visibility
+        text = text.replace('[', ' [ ').replace(']', ' ] ')
+        return text
+
+    # Use translated data if available, otherwise use original
+    data = translated_data if translated_data else original_data
+    
     if data and 'rows' in data:
-        for row in data['rows']:
-            # Convert special characters to visible format
-            def format_text(text):
-                if not text:
-                    return ""
-                # Replace special characters with visible representations
-                text = text.replace('\n', '\\n').replace('\t', '\\t').replace('\r', '\\r')
-                # Handle square brackets by adding spaces around them for better visibility
-                text = text.replace('[', ' [ ').replace(']', ' ] ')
-                return text
+        for idx, row in enumerate(data['rows']):
+            # Get original text if available
+            original_text = ""
+            if original_data and 'rows' in original_data and len(original_data['rows']) > idx:
+                original_text = original_data['rows'][idx].get('name', '')
             
-            original_text = row.get('name', '')
-            formatted_text = format_text(original_text)
+            # Get translated text
+            translated_text = row.get('name', '')
+            
             tree.insert("", "end", values=(
                 row.get('$id', ''),
                 row.get('label', ''),
-                row.get('style', ''),
-                formatted_text,
-                formatted_text  # Format edited text column too
+                format_text(original_text),
+                format_text(translated_text)
             ))
 
             # Calculate text height for the "EDITED TEXT" column
             text = row.get('name', '')
-            font_style = font.Font(family="MS Gothic", size=10)  # Use the same font as the Treeview
-            width = 200 // 7  # Width of the "EDITED TEXT" column in characters
+            font_style = font.Font(family="MS Gothic", size=10)
+            width = 200 // 7
             height = calculate_text_height(text, font_style, width)
 
-            # Set row height
             s = ttk.Style()
-            s.configure('Treeview', rowheight=int(height + 15))  # Add more padding
+            s.configure('Treeview', rowheight=int(height + 15))
 
 # --- GUI Functions ---
 
@@ -99,6 +109,15 @@ def browse_base_dir():
     if BASE_DIR:
         base_dir_label.config(text=f"Base Directory: {BASE_DIR}")
         populate_file_list()
+        save_gui_state()  # Save the GUI state
+
+def browse_second_base_dir():
+    """Opens a directory dialog to select the second base directory."""
+    global SECOND_BASE_DIR
+    SECOND_BASE_DIR = filedialog.askdirectory()
+    if SECOND_BASE_DIR:
+        second_base_dir_label.config(text=f"Second Directory: {SECOND_BASE_DIR}")
+        save_gui_state()  # Save the GUI state
 
 # Add this at the top with other global variables
 ORIGINAL_FILE_LIST = []
@@ -176,12 +195,24 @@ def populate_file_list():
 
 def load_table_data(json_path):
     """Loads the selected JSON file into the table."""
-    global CURRENT_JSON_PATH, CURRENT_JSON_DATA
+    global CURRENT_JSON_PATH, CURRENT_JSON_DATA, CURRENT_ORIGINAL_JSON_PATH, CURRENT_ORIGINAL_JSON_DATA
 
     CURRENT_JSON_PATH = json_path
     CURRENT_JSON_DATA = load_json(CURRENT_JSON_PATH)
+    
+    # Find corresponding file in second base dir if it exists
+    CURRENT_ORIGINAL_JSON_DATA = None
+    if SECOND_BASE_DIR:
+        # Get relative path from first base dir
+        rel_path = os.path.relpath(json_path, BASE_DIR)
+        # Build path in second base dir
+        original_path = os.path.join(SECOND_BASE_DIR, rel_path)
+        if os.path.exists(original_path):
+            CURRENT_ORIGINAL_JSON_PATH = original_path
+            CURRENT_ORIGINAL_JSON_DATA = load_json(original_path)
+    
     if CURRENT_JSON_DATA:
-        populate_table(TREE, CURRENT_JSON_DATA)
+        populate_table(TREE, CURRENT_ORIGINAL_JSON_DATA, CURRENT_JSON_DATA)
 
 def file_list_select(event):
     """Handles selection in the file list."""
@@ -225,7 +256,7 @@ def save_table_data():
 
     # Get data from the treeview
     for index, item in enumerate(TREE.get_children()):
-        edited_text = TREE.item(item)['values'][4]  # Get the value from the "EDITED TEXT" column
+        edited_text = TREE.item(item)['values'][3]  # Get the value from the translated text column
         # Convert visible special characters back to actual characters
         if edited_text:
             edited_text = edited_text.replace('\\n', '\n').replace('\\t', '\t').replace('\\r', '\r')
@@ -237,11 +268,13 @@ def save_table_data():
 
 def undo_changes():
     """Reloads the original JSON data into the table, discarding changes."""
-    global CURRENT_JSON_PATH, CURRENT_JSON_DATA, UNSAVED_CHANGES
+    global CURRENT_JSON_PATH, CURRENT_JSON_DATA, CURRENT_ORIGINAL_JSON_DATA, UNSAVED_CHANGES
     if CURRENT_JSON_PATH:
+        # Reload the JSON data
         CURRENT_JSON_DATA = load_json(CURRENT_JSON_PATH)
         if CURRENT_JSON_DATA:
-            populate_table(TREE, CURRENT_JSON_DATA)
+            # Repopulate the table with original and translated data
+            populate_table(TREE, CURRENT_ORIGINAL_JSON_DATA, CURRENT_JSON_DATA)
             messagebox.showinfo("Info", "Changes undone. Table reloaded from file.")
             UNSAVED_CHANGES = False  # Reset the flag after undo
     else:
@@ -261,7 +294,7 @@ def edit_cell(event):
         column_id = int(column[1:]) - 1
 
         # Only allow editing of the "EDITED TEXT" column (column 4)
-        if column_id == 4:
+        if column_id == 3:
             # Get bounding box of the cell
             x, y, width, height = TREE.bbox(item, column)
 
@@ -286,7 +319,6 @@ def edit_cell(event):
                 # Update the tree values
                 values = list(TREE.item(item, 'values'))
                 values[column_id] = formatted_value  # Store formatted version
-                values[3] = formatted_value         # Update the display version
                 TREE.item(item, values=values)
                 UNSAVED_CHANGES = True  # Set the flag when a change is made
                 
@@ -371,10 +403,61 @@ def save_config():
     except Exception as e:
         print(f"Error saving config: {e}")
 
+def save_gui_state():
+    """Saves the GUI state (base directories) to the config file."""
+    config = configparser.ConfigParser()
+    config['GUI_STATE'] = {
+        'base_dir': BASE_DIR if BASE_DIR else "",
+        'second_base_dir': SECOND_BASE_DIR if SECOND_BASE_DIR else ""
+    }
+    # Add quotes around the values
+    for key in config['GUI_STATE']:
+        config['GUI_STATE'][key] = f"\"{config['GUI_STATE'][key]}\""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    script_name = os.path.splitext(os.path.basename(__file__))[0]
+    config_path = os.path.join(script_dir, f"{script_name}.ini")  # Save in the same directory as the script
+
+    try:
+        with open(config_path, 'w') as configfile:
+            config.write(configfile)
+    except Exception as e:
+        print(f"Error saving GUI state: {e}")
+
+def load_gui_state():
+    """Loads the GUI state (base directories) from the config file."""
+    global BASE_DIR, SECOND_BASE_DIR
+    config = configparser.ConfigParser()
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    script_name = os.path.splitext(os.path.basename(__file__))[0]
+    config_path = os.path.join(script_dir, f"{script_name}.ini")
+
+    try:
+        config.read(config_path)
+        if 'GUI_STATE' in config:
+            BASE_DIR = config['GUI_STATE'].get('base_dir', "").strip('"')
+            SECOND_BASE_DIR = config['GUI_STATE'].get('second_base_dir', "").strip('"')
+
+            print(f"Loaded BASE_DIR: {BASE_DIR}")
+            print(f"Loaded SECOND_BASE_DIR: {SECOND_BASE_DIR}")
+
+            # Update the labels
+            if BASE_DIR:
+                base_dir_label.config(text=f"Base Directory: {BASE_DIR}")
+                populate_file_list()
+            if SECOND_BASE_DIR:
+                second_base_dir_label.config(text=f"Second Directory: {SECOND_BASE_DIR}")
+
+    except Exception as e:
+        print(f"Error loading GUI state: {e}")
+    print(f"Config file path: {config_path}")
+
 # --- GUI Setup ---
 
 root = tk.Tk()
 root.title("BDAT Translation Tool")
+
+# Call save_gui_state when the window is closed
+root.protocol("WM_DELETE_WINDOW", lambda: [save_gui_state(), root.destroy()])
 
 # --- Top Frame (Directory/File Navigation and Buttons) ---
 top_frame = ttk.Frame(root, padding=10)
@@ -398,15 +481,11 @@ base_dir_button.pack(side=tk.LEFT, padx=5, pady=5)
 base_dir_label = ttk.Label(top_frame, text="Base Directory: None")
 base_dir_label.pack(side=tk.LEFT, padx=5, pady=5)
 
-# --- Folder Status Buttons ---
-mark_green_button = ttk.Button(top_frame, text="Mark Green", command=lambda: mark_folder("green"))
-mark_green_button.pack(side=tk.LEFT, padx=5, pady=5)
+second_base_dir_button = ttk.Button(top_frame, text="Select Second Dir", command=browse_second_base_dir)
+second_base_dir_button.pack(side=tk.LEFT, padx=5, pady=5)
 
-mark_orange_button = ttk.Button(top_frame, text="Mark Orange", command=lambda: mark_folder("orange"))
-mark_orange_button.pack(side=tk.LEFT, padx=5, pady=5)
-
-clear_color_button = ttk.Button(top_frame, text="Clear Color", command=lambda: mark_folder(None))
-clear_color_button.pack(side=tk.LEFT, padx=5, pady=5)
+second_base_dir_label = ttk.Label(top_frame, text="Second Directory: None")
+second_base_dir_label.pack(side=tk.LEFT, padx=5, pady=5)
 
 # --- Panedwindow for Left/Right Sections ---
 paned_window = ttk.Panedwindow(root, orient=tk.HORIZONTAL)
@@ -431,6 +510,56 @@ file_list.column("Type", width=50, stretch=False)
 file_list.column("Path", width=0, stretch=False)  # Hide the path column
 file_list.bind("<Double-1>", file_list_select)  # Double-click to load
 
+def open_translated_dir(event=None):
+    selected_item = file_list.selection()
+    if selected_item:
+        item_type = file_list.item(selected_item, 'values')[0]
+        item_path = file_list.item(selected_item, 'values')[1]
+        if item_type == "folder":
+            inner_folder_path = os.path.join(item_path, os.path.basename(item_path))
+            try:
+                os.startfile(inner_folder_path)
+            except OSError:
+                messagebox.showerror("Error", "Unable to open directory.")
+
+def open_original_dir(event=None):
+    selected_item = file_list.selection()
+    if selected_item:
+        item_type = file_list.item(selected_item, 'values')[0]
+        item_path = file_list.item(selected_item, 'values')[1]
+        
+        # Check if a second base directory is set
+        if SECOND_BASE_DIR:
+            # Get the relative path from the base directory
+            rel_path = os.path.relpath(item_path, BASE_DIR)
+            # Construct the path in the second base directory
+            original_path = os.path.join(SECOND_BASE_DIR, rel_path)
+            inner_original_path = os.path.join(original_path, os.path.basename(original_path))
+            
+            # Check if the directory exists in the second base directory
+            if os.path.exists(inner_original_path):
+                try:
+                    os.startfile(inner_original_path)
+                except OSError:
+                    messagebox.showerror("Error", "Unable to open original directory.")
+            else:
+                messagebox.showinfo("Info", "Original directory not found.")
+        else:
+            messagebox.showinfo("Info", "Second base directory not set.")
+
+def show_context_menu(event):
+    selected_item = file_list.selection()
+    if selected_item:
+        context_menu.post(event.x_root, event.y_root)
+
+# Create context menu
+context_menu = tk.Menu(root, tearoff=0)
+context_menu.add_command(label="Open Translated JSON Directory", command=open_translated_dir)
+context_menu.add_command(label="Open Original JSON Directory", command=open_original_dir)
+
+# Bind right click to show context menu
+file_list.bind("<Button-3>", show_context_menu)
+
 file_list_scrollbar.config(command=file_list.yview)
 
 # --- Define tags for background colors ---
@@ -451,34 +580,73 @@ save_button.pack(side=tk.LEFT, padx=5, pady=5)
 undo_button = ttk.Button(button_frame, text="Undo", command=undo_changes)
 undo_button.pack(side=tk.LEFT, padx=5, pady=5)
 
+mark_green_button = ttk.Button(button_frame, text="Mark Green", command=lambda: mark_folder("green"))
+mark_green_button.pack(side=tk.LEFT, padx=5, pady=5)
+
+mark_orange_button = ttk.Button(button_frame, text="Mark Orange", command=lambda: mark_folder("orange"))
+mark_orange_button.pack(side=tk.LEFT, padx=5, pady=5)
+
+clear_color_button = ttk.Button(button_frame, text="Clear Color", command=lambda: mark_folder(None))
+clear_color_button.pack(side=tk.LEFT, padx=5, pady=5)
+
 # --- Treeview Table ---
 s = ttk.Style()
 s.configure('Treeview', rowheight=40)
 
-TREE = ttk.Treeview(right_frame, columns=("ID", "LABEL", "STYLE", "NAME", "EDITED TEXT"), show="headings", style='Treeview')
+TREE = ttk.Treeview(right_frame, columns=("ID", "LABEL", "ORIGINAL TEXT", "TRANSLATED TEXT"), show="headings", style='Treeview')
 TREE.heading("ID", text="ID")
 TREE.heading("LABEL", text="LABEL")
-TREE.heading("STYLE", text="STYLE")
-TREE.heading("NAME", text="NAME")
-TREE.heading("EDITED TEXT", text="EDITED TEXT")
+TREE.heading("ORIGINAL TEXT", text="ORIGINAL TEXT")
+TREE.heading("TRANSLATED TEXT", text="TRANSLATED TEXT")
 
 # Set column widths
 TREE.column("ID", width=50, stretch=False)
 TREE.column("LABEL", width=150, stretch=False)
-TREE.column("STYLE", width=50, stretch=False)
-TREE.column("NAME", width=200)
-TREE.column("EDITED TEXT", width=200, anchor=tk.W)  # Allow text wrapping
+TREE.column("ORIGINAL TEXT", width=200, anchor=tk.W)
+TREE.column("TRANSLATED TEXT", width=200, anchor=tk.W)  # Allow text wrapping
 
 TREE.pack(fill=tk.BOTH, expand=True)
 
 # Bind double click to edit cell
 TREE.bind("<Double-1>", edit_cell)
 
-# --- Buttons ---
-save_button = ttk.Button(right_frame, text="Save", command=save_table_data)
-save_button.pack(side=tk.LEFT, padx=5, pady=5)
+def copy_cell_value():
+    """Copies the value of the selected cell to the clipboard."""
+    item = TREE.selection()[0]  # Get the selected item
+    column_id = int(TREE.identify_column(event.x)[1:]) - 1  # Get the column ID
+    value = TREE.item(item, 'values')[column_id]  # Get the cell value
+    root.clipboard_clear()
+    root.clipboard_append(value)
+    root.update()
 
-undo_button = ttk.Button(right_frame, text="Undo", command=undo_changes)
-undo_button.pack(side=tk.LEFT, padx=5, pady=5)
+def show_tree_context_menu(event):
+    """Shows the context menu for the Treeview."""
+    for item in TREE.selection():
+        tree_context_menu.post(event.x_root, event.y_root)
+
+# Create context menu for the Treeview
+tree_context_menu = tk.Menu(root, tearoff=0)
+tree_context_menu.add_command(label="Copy Cell Value", command=lambda: copy_cell_value())
+
+def show_tree_context_menu(event):
+    """Shows the context menu for the Treeview."""
+    tree_context_menu.post(event.x_root, event.y_root)
+    global context_menu_event
+    context_menu_event = event
+
+def copy_cell_value():
+    """Copies the value of the selected cell to the clipboard."""
+    item = TREE.selection()[0]  # Get the selected item
+    column_id = int(TREE.identify_column(context_menu_event.x)[1:]) - 1  # Get the column ID
+    value = TREE.item(item, 'values')[column_id]  # Get the cell value
+    root.clipboard_clear()
+    root.clipboard_append(value)
+    root.update()
+
+# Bind right click to show context menu
+TREE.bind("<Button-3>", show_tree_context_menu)
+
+# Load GUI state on startup
+load_gui_state()
 
 root.mainloop()
