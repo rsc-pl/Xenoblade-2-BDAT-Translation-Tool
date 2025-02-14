@@ -68,7 +68,7 @@ def populate_table(tree, original_data, translated_data):
         # Replace special characters with visible representations
         text = text.replace('\n', '\\n').replace('\t', '\\t').replace('\r', '\\r')
         # Handle square brackets by adding spaces around them for better visibility
-        text = text.replace('[', ' [ ').replace(']', ' ] ')
+        #text = text.replace('[', ' [ ').replace(']', ' ] ')
         return text
 
     # Use translated data if available, otherwise use original
@@ -147,10 +147,14 @@ def filter_folders(event=None):
             # Add matching children
             for child in folder['children']:
                 if not search_text or search_text in child['text'].lower():
-                    file_list.insert(folder_id, "end", 
+                    child_id = file_list.insert(folder_id, "end", 
                         text=child['text'], 
                         values=child['values']
                     )
+                    # Apply color to child if it's in FOLDER_STATUS
+                    rel_path = child['values'][1].replace(BASE_DIR + '\\', '').replace('\\', '/')
+                    if rel_path in FOLDER_STATUS:
+                        file_list.item(child_id, tags=(FOLDER_STATUS[rel_path],))
 
 def populate_file_list():
     """Populates the file list with BDAT folders and JSON files."""
@@ -160,7 +164,6 @@ def populate_file_list():
         file_list.delete(item)
 
     if BASE_DIR:
-        load_config()  # Load the configuration file
         ORIGINAL_FILE_LIST = []  # Reset the original list
 
         for bdat_folder in os.listdir(BASE_DIR):
@@ -304,9 +307,7 @@ def edit_cell(event):
             # Create a text widget for multiline editing
             text_widget = tk.Text(TREE, wrap=tk.WORD, width=width//7, height=4)
             # Display escaped special characters for editing
-            edit_value = value
-            # Remove extra spaces around square brackets for editing
-            edit_value = edit_value.replace(' [ ', '[').replace(' ] ', ']')
+            edit_value = value.replace('\n', '\\n')
             text_widget.insert("1.0", edit_value)
             text_widget.place(x=x, y=y, width=width, height=height)
             text_widget.focus()
@@ -343,14 +344,15 @@ def edit_cell(event):
             text_widget.bind('<Escape>', cancel_edit)
 
 def mark_folder(status):
-    """Marks the selected folder with a background color."""
+    """Marks the selected folder or file with a background color."""
     selected_item = file_list.selection()
     if not selected_item:
-        messagebox.showinfo("Info", "Please select a folder.")
+        messagebox.showinfo("Info", "Please select a folder or file.")
         return
 
-    folder_name = file_list.item(selected_item, 'text')  # Get folder name from the text
-    folder_path = file_list.item(selected_item, 'values')[1]
+    item_text = file_list.item(selected_item, 'text')
+    item_path = file_list.item(selected_item, 'values')[1]
+    item_type = file_list.item(selected_item, 'values')[0]
 
     if status == "green":
         color = "green"
@@ -359,12 +361,24 @@ def mark_folder(status):
     else:
         color = ""  # Set color to empty string to clear the tag
 
-    # Update the folder status in the dictionary
-    if folder_name:
+    # For files, store relative path from the BDAT folder
+    if item_type == "file":
+        # Get the BDAT folder name (parent folder)
+        bdat_folder = os.path.basename(os.path.dirname(os.path.dirname(item_path)))
+        # Get relative path within BDAT folder
+        rel_path = os.path.relpath(item_path, os.path.join(BASE_DIR, bdat_folder))
+        # Convert to forward slashes for consistency
+        key = rel_path.replace('\\', '/')
+    else:
+        # For folders, just use the folder name
+        key = item_text
+
+    # Update the status in the dictionary
+    if key:
         if status:
-            FOLDER_STATUS[folder_name] = status  # Store the status
+            FOLDER_STATUS[key] = status  # Store the status
         else:
-            FOLDER_STATUS.pop(folder_name, None)  # Remove the folder from the status if clearing
+            FOLDER_STATUS.pop(key, None)  # Remove the item from the status if clearing
 
         # Apply the tag to the selected item
         file_list.item(selected_item, tags=(color,))
@@ -372,7 +386,7 @@ def mark_folder(status):
         save_config()  # Save the configuration
 
 def load_config():
-    """Loads the folder status from the config file."""
+    """Loads the folder and file status from the config file."""
     global FOLDER_STATUS
     config = configparser.ConfigParser()
     config_path = os.path.join(BASE_DIR, "translation_config.ini")
@@ -380,16 +394,43 @@ def load_config():
     try:
         config.read(config_path)
         if 'FOLDER_STATUS' in config:
-            for folder, status in config['FOLDER_STATUS'].items():
-                FOLDER_STATUS[folder] = status
+            FOLDER_STATUS = {k: v for k, v in config['FOLDER_STATUS'].items()}
     except Exception as e:
         print(f"Error loading config: {e}")
 
-    # Apply colors to folders based on loaded config
+    # Apply colors to both folders and files based on loaded config
     for item in file_list.get_children():
-        folder_name = file_list.item(item, 'text')
-        if folder_name in FOLDER_STATUS:
-            file_list.item(item, tags=(FOLDER_STATUS[folder_name],))
+        item_text = file_list.item(item, 'text')
+        item_path = file_list.item(item, 'values')[1]
+        item_type = file_list.item(item, 'values')[0]
+
+        if item_type == "folder":
+            # For folders, check by name
+            if item_text in FOLDER_STATUS:
+                file_list.item(item, tags=(FOLDER_STATUS[item_text],))
+            # Apply colors to child files as well
+            for child in file_list.get_children(item):
+                child_text = file_list.item(child, 'text')
+                child_path = file_list.item(child, 'values')[1]
+                # Get the BDAT folder name (parent folder)
+                bdat_folder = os.path.basename(os.path.dirname(os.path.dirname(child_path)))
+                # Get relative path within BDAT folder
+                rel_path = os.path.relpath(child_path, os.path.join(BASE_DIR, bdat_folder))
+                # Convert to forward slashes for consistency
+                key = rel_path.replace('\\', '/')
+                if key in FOLDER_STATUS:
+                    file_list.item(child, tags=(FOLDER_STATUS[key],))
+
+        elif item_type == "file":
+            # For files, check by relative path
+            # Get the BDAT folder name (parent folder)
+            bdat_folder = os.path.basename(os.path.dirname(os.path.dirname(item_path)))
+            # Get relative path within BDAT folder
+            rel_path = os.path.relpath(item_path, os.path.join(BASE_DIR, bdat_folder))
+            # Convert to forward slashes for consistency
+            key = rel_path.replace('\\', '/')
+            if key in FOLDER_STATUS:
+                file_list.item(item, tags=(FOLDER_STATUS[key],))
 
 def save_config():
     """Saves the folder status to the config file."""
@@ -521,6 +562,11 @@ def open_translated_dir(event=None):
                 os.startfile(inner_folder_path)
             except OSError:
                 messagebox.showerror("Error", "Unable to open directory.")
+        elif item_type == "file":
+            try:
+                os.startfile(item_path)
+            except OSError:
+                messagebox.showerror("Error", "Unable to open file.")
 
 def open_original_dir(event=None):
     selected_item = file_list.selection()
@@ -534,16 +580,26 @@ def open_original_dir(event=None):
             rel_path = os.path.relpath(item_path, BASE_DIR)
             # Construct the path in the second base directory
             original_path = os.path.join(SECOND_BASE_DIR, rel_path)
-            inner_original_path = os.path.join(original_path, os.path.basename(original_path))
             
-            # Check if the directory exists in the second base directory
-            if os.path.exists(inner_original_path):
-                try:
-                    os.startfile(inner_original_path)
-                except OSError:
-                    messagebox.showerror("Error", "Unable to open original directory.")
-            else:
-                messagebox.showinfo("Info", "Original directory not found.")
+            # Check if the item is a folder or a file
+            if item_type == "folder":
+                # Check if the directory exists in the second base directory
+                if os.path.isdir(original_path):
+                    try:
+                        os.startfile(original_path)
+                    except OSError:
+                        messagebox.showerror("Error", "Unable to open original directory.")
+                else:
+                    messagebox.showinfo("Info", "Original directory not found.")
+            elif item_type == "file":
+                # Check if the file exists in the second base directory
+                if os.path.isfile(original_path):
+                    try:
+                        os.startfile(original_path)
+                    except OSError:
+                        messagebox.showerror("Error", "Unable to open original file.")
+                else:
+                    messagebox.showinfo("Info", "Original file not found.")
         else:
             messagebox.showinfo("Info", "Second base directory not set.")
 
@@ -605,6 +661,10 @@ TREE.column("LABEL", width=150, stretch=False)
 TREE.column("ORIGINAL TEXT", width=200, anchor=tk.W)
 TREE.column("TRANSLATED TEXT", width=200, anchor=tk.W)  # Allow text wrapping
 
+# Add a Scrollbar to the Treeview Table
+tree_scroll = ttk.Scrollbar(right_frame, orient="vertical", command=TREE.yview)
+TREE.configure(yscrollcommand=tree_scroll.set)
+tree_scroll.pack(side="right", fill="y")
 TREE.pack(fill=tk.BOTH, expand=True)
 
 # Bind double click to edit cell
@@ -648,5 +708,31 @@ TREE.bind("<Button-3>", show_tree_context_menu)
 
 # Load GUI state on startup
 load_gui_state()
+
+# Load config after GUI state is loaded and BASE_DIR is set
+if BASE_DIR:
+    print(f"Loading config from: {os.path.join(BASE_DIR, 'translation_config.ini')}")
+    load_config()
+    # Apply colors to folders based on loaded config
+    for item in file_list.get_children():
+        folder_name = file_list.item(item, 'text')
+        if folder_name in FOLDER_STATUS:
+            file_list.item(item, tags=(FOLDER_STATUS[folder_name],))
+    populate_file_list()  # Ensure the file list is populated with the correct colors
+    
+    # Apply colors to files after populating the file list
+    for item in file_list.get_children():
+        item_type = file_list.item(item, 'values')[0]
+        if item_type == "folder":
+            for child in file_list.get_children(item):
+                child_path = file_list.item(child, 'values')[1]
+                # Get the BDAT folder name (parent folder)
+                bdat_folder = os.path.basename(os.path.dirname(os.path.dirname(child_path)))
+                # Get relative path within BDAT folder
+                rel_path = os.path.relpath(child_path, os.path.join(BASE_DIR, bdat_folder))
+                # Convert to forward slashes for consistency
+                key = rel_path.replace('\\', '/')
+                if key in FOLDER_STATUS:
+                    file_list.item(child, tags=(FOLDER_STATUS[key],))
 
 root.mainloop()
