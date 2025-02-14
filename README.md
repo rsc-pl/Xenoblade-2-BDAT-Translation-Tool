@@ -24,6 +24,11 @@ This translation tool provides a user-friendly interface for translating Xenobla
 - 🔎 Quick search/filter functionality
 - ⚡ Real-time text editing with special character support
 - 💾 Automatic configuration saving
+- 🔄 Dual directory support for original and translated files
+- 📋 Copy cell contents functionality
+- 🖥️ Quick access to file directories
+- 💡 Smart unsaved changes detection
+- 🔍 Enhanced search capabilities
 
 ## 📋 Requirements
 
@@ -41,27 +46,29 @@ This translation tool provides a user-friendly interface for translating Xenobla
 
 ### Initial Setup
 
-1. Click "Select Base Dir" and choose the directory containing your extracted BDAT folders
-2. The file tree will populate with all available BDAT folders and their JSON files
+1. Click "Select Base Dir" to choose the directory containing your translated BDAT folders
+2. Click "Select Second Dir" to choose the directory containing original language BDAT files (optional)
+3. The file tree will populate with all available BDAT folders and their JSON files
 
 ### Navigation
 
-- 🔍 Use the search bar to filter folders and files
+- 🔍 Use the search bar to filter folders and files in real-time
 - 📂 Double-click folders or files to load them
-- 📑 The right panel shows the content of the selected JSON file
+- 📑 The right panel shows the content of the selected JSON file with both original and translated text
+- 🖱️ Right-click on folders or files to:
+  - Open the translated JSON directory
+  - Open the original JSON directory (if second directory is set)
 
 ### Translation Process
 
 1. Select a BDAT folder or JSON file from the left panel
-2. Double-click the "EDITED TEXT" cell to begin translation
+2. Double-click the "TRANSLATED TEXT" cell to begin translation
 3. Edit the text:
    - Press Enter to save changes
    - Use Ctrl+Enter for new lines
    - Press Escape to cancel editing
-4. Special characters are handled automatically:
+4. Special characters support:
    - `\n` for new lines
-   - `\t` for tabs
-   - `\r` for carriage returns
    - Square brackets `[ ]` are preserved
 
 ### Progress Tracking
@@ -77,77 +84,81 @@ Use the buttons at the top to:
 - "Mark Orange" - Mark selected folder as in progress
 - "Clear Color" - Remove progress marking
 
+### Working with Original Text
+
+- 📝 Original text is displayed alongside the translation
+- 🔄 Switch between original and translated files easily
+- 📋 Right-click to copy cell contents
+- 🖥️ Quick access to both original and translated file directories
+
 ### Saving and Undoing Changes
 
 - 💾 Click "Save" to save your translations
 - ↩️ Click "Undo" to revert to the last saved version
 - ⚠️ The tool will prompt to save unsaved changes when switching files
+- 🔄 Automatic state saving between sessions
 
 ## 🗃️ File Structure
 
-The tool expects the following structure (created by the BDAT Extract tool):
+The tool now supports two parallel directory structures:
 ```
-Base Directory/
+Base Directory/ (Translated)
 ├── BDAT_Folder1/
 │   └── BDAT_Folder1/
 │       ├── file1.json
 │       └── file2.json
-├── BDAT_Folder2/
-│   └── BDAT_Folder2/
+└── translation_config.ini
+
+Second Directory/ (Original)
+├── BDAT_Folder1/
+│   └── BDAT_Folder1/
 │       ├── file1.json
 │       └── file2.json
-└── translation_config.ini
 ```
 
-## 💾 Progress Saving
+## 💾 Configuration Saving
 
-- Translation progress (color coding) is automatically saved in `translation_config.ini`
-- The file is created automatically in your base directory
-- Progress is restored when reopening the tool
+The tool now saves two types of configurations:
+1. **Translation Progress** (`translation_config.ini` in base directory):
+   - Color coding status for folders and files
+   - Translation progress tracking
+2. **GUI State** (`Xenoblade2-Translation-GUI.ini` in script directory):
+   - Base directory path
+   - Second directory path
+   - Window state and preferences
 
 ## 🔧 Technical Details
 
-### JSON Structure
-The tool preserves the original JSON structure, saving the name field where the original text is stored:
-```json
-{
-  "rows": [
-    {
-      "$id": "1",
-      "label": "example",
-      "style": "0",
-      "name": "Text",
-    }
-  ]
-}
-```
-
 ### Special Character Handling
 - Special characters are displayed in a readable format during editing
-- They are automatically converted back to proper format when saving
-- The tool maintains proper formatting for game compatibility
+- Automatic conversion between display and storage formats
+- Preserves game-specific formatting requirements
 
 ## ⚠️ Important Notes
 
-1. Always back up your original files before translation
+1. Always back up your original files
 2. Save frequently to prevent loss of work
 3. The tool automatically tracks unsaved changes
 4. Use the search function to quickly find specific files
 5. Color coding is saved across sessions
+6. Original text is preserved in the second directory
 
 ## 🔄 Workflow Tips
 
-1. Start by marking folders orange as you begin translation
-2. Use the search function to find related content across files
-3. Mark folders green only when completely translated
-4. Regularly save your progress
-5. Use Ctrl+Enter for multi-line translations
+1. Start by setting up both original and translated directories
+2. Use the right-click menu for quick directory access
+3. Copy original text cells for reference
+4. Mark folders orange as you begin translation
+5. Use the search function to find related content
+6. Mark folders green when completely translated
+7. Save regularly and check for unsaved changes warnings
 
 ## 🎮 Game Compatibility
 
 - The tool is designed specifically for Xenoblade 2 BDAT files
-- It maintains the correct file structure and formatting for game compatibility
-- Special characters are handled according to the game's requirements
+- Maintains correct file structure and formatting
+- Preserves special characters and game-specific requirements
+- Supports parallel original/translated file structures
 
 ## 🔗 Related Tools
 
