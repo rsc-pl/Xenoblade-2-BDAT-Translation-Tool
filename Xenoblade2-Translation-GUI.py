@@ -6,6 +6,7 @@ import threading
 import shutil
 import configparser
 from tkinter import font
+import re
 import atexit
 
 # --- New Global Variables ---
@@ -46,6 +47,58 @@ def save_json(filepath, data):
     except Exception as e:
         messagebox.showerror("Error Saving JSON", str(e))
 
+def show_character_counts(text_widget):
+    """Show character counts for each line in a tooltip."""
+    # Get the text and split by newlines
+    text = text_widget.get("1.0", "end-1c")
+    lines = text.split('\\n')
+    
+    # Create a tooltip window
+    tooltip = tk.Toplevel(text_widget)
+    tooltip.wm_overrideredirect(True)
+    tooltip.wm_geometry("+%d+%d" % (text_widget.winfo_rootx(), text_widget.winfo_rooty() - 70))
+    
+    # Create labels for each line count
+    for i, line in enumerate(lines):
+        count = len(line)
+        label = tk.Label(tooltip, text=f"Line {i+1}: {count} chars", bg="yellow", fg="black")
+        label.pack()
+    
+    # Update position when text widget moves
+    def update_position():
+        tooltip.wm_geometry("+%d+%d" % (text_widget.winfo_rootx(), text_widget.winfo_rooty() - 70))
+        tooltip.after(100, update_position)
+    
+    update_position()
+    
+    # Destroy tooltip when text widget loses focus
+    def destroy_tooltip(event=None):
+        tooltip.destroy()
+    
+    text_widget.bind('<FocusOut>', destroy_tooltip)
+    return tooltip
+
+def check_line_length(filename, text):
+    """Checks if any line in the text exceeds the character limit based on the filename.
+    Ignores characters within square brackets."""
+    if not text:
+        return False
+
+    if filename.startswith("bf"):
+        limit = 56
+    elif filename.startswith("campfev") or filename.startswith("fev") or filename.startswith("kizuna") or filename.startswith("qst") or filename.startswith("tlk"):
+        limit = 41
+    else:
+        return False  # No limit defined for this filename
+
+    lines = text.split('\\n')
+    for line in lines:
+        # Remove content within square brackets
+        line = re.sub(r'\[.*?\]', '', line)
+        if len(line) > limit:
+            return True
+    return False
+
 def calculate_text_height(text, font, width):
     """Calculates the height of the text based on the font and width."""
     text_widget = tk.Text(root, font=font, wrap=tk.WORD, width=width)
@@ -83,17 +136,23 @@ def populate_table(tree, original_data, translated_data):
             
             # Get translated text
             translated_text = row.get('name', '')
-            
-            tree.insert("", "end", values=(
+
+            item_id = tree.insert("", "end", values=(
                 row.get('$id', ''),
                 row.get('label', ''),
                 format_text(original_text),
                 format_text(translated_text)
             ))
+            
+            # Check line length and apply tag
+            if CURRENT_JSON_PATH:
+                filename = os.path.basename(CURRENT_JSON_PATH)
+                if check_line_length(filename, format_text(translated_text)):
+                    tree.item(item_id, tags=("red",))
 
             # Calculate text height for the "EDITED TEXT" column
             text = row.get('name', '')
-            font_style = font.Font(family="MS Gothic", size=10)
+            font_style = font.Font(family="Calibri", size=12)
             width = 200 // 7
             height = calculate_text_height(text, font_style, width)
 
@@ -312,24 +371,36 @@ def edit_cell(event):
             text_widget.place(x=x, y=y, width=width, height=height)
             text_widget.focus()
 
+            # Show character counts
+            tooltip = show_character_counts(text_widget)
+
             def save_value(event=None):
                 # Get the text and convert special characters back to visible format
                 new_value = text_widget.get("1.0", "end-1c")
                 formatted_value = new_value.replace('\n', '\\n').replace('\t', '\\t').replace('\r', '\\r')
-                
+
                 # Update the tree values
                 values = list(TREE.item(item, 'values'))
                 values[column_id] = formatted_value  # Store formatted version
                 TREE.item(item, values=values)
                 UNSAVED_CHANGES = True  # Set the flag when a change is made
-                
+
+                # Check line length and apply tag
+                if CURRENT_JSON_PATH:
+                    filename = os.path.basename(CURRENT_JSON_PATH)
+                    if check_line_length(filename, formatted_value):
+                        TREE.item(item, tags=("red",))
+                    else:
+                        TREE.item(item, tags=())  # Remove the tag if it exists
+
                 # Update row height
-                font_style = font.Font(family="MS Gothic", size=10)
+                font_style = font.Font(family="Calibri", size=12)
                 new_height = calculate_text_height(formatted_value, font_style, width//7)
                 s = ttk.Style()
                 s.configure('Treeview', rowheight=int(new_height + 15))
                 
                 text_widget.destroy()
+                tooltip.destroy()
 
             # Bind enter key to save the value
             text_widget.bind('<Return>', save_value)
@@ -341,7 +412,24 @@ def edit_cell(event):
             # Bind escape key to cancel editing
             def cancel_edit(event):
                 text_widget.destroy()
+                tooltip.destroy()
             text_widget.bind('<Escape>', cancel_edit)
+
+            # Update character counts while typing
+            def update_counts(event=None):
+                try:
+                    # Update the tooltip with new counts
+                    text = text_widget.get("1.0", "end-1c")
+                    lines = text.split('\\n')
+                    for i, label in enumerate(tooltip.winfo_children()):
+                        if i < len(lines):
+                            count = len(lines[i])
+                            label.config(text=f"Line {i+1}: {count} chars")
+                except:
+                    pass
+                return True
+            
+            text_widget.bind('<KeyRelease>', update_counts)
 
 def mark_folder(status):
     """Marks the selected folder or file with a background color."""
@@ -621,6 +709,7 @@ file_list_scrollbar.config(command=file_list.yview)
 # --- Define tags for background colors ---
 file_list.tag_configure("green", background="green")
 file_list.tag_configure("orange", background="orange")
+file_list.tag_configure("red", background="red")
 
 # --- Right Frame (Table Editor) ---
 right_frame = ttk.Frame(paned_window, padding=10)
@@ -666,6 +755,9 @@ tree_scroll = ttk.Scrollbar(right_frame, orient="vertical", command=TREE.yview)
 TREE.configure(yscrollcommand=tree_scroll.set)
 tree_scroll.pack(side="right", fill="y")
 TREE.pack(fill=tk.BOTH, expand=True)
+
+# Define tag for red background
+TREE.tag_configure("red", background="red")
 
 # Bind double click to edit cell
 TREE.bind("<Double-1>", edit_cell)
