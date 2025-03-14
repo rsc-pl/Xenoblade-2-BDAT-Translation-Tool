@@ -14,6 +14,7 @@
 This translation tool provides a user-friendly interface for translating Xenoblade 2 extracted BDAT files. It's designed to work with BDAT files that have been extracted using the [BDAT Batch Extract/Unpack GUI Tool](https://github.com/rsc-pl/Xenoblade2-BDAT-Batch-Extract-Unpack-GUI).
 
 ![Screen](graphics/GUI.jpg)
+![Screen](graphics/GUI2.jpg)
 
 ## ✨ Features
 
@@ -29,6 +30,8 @@ This translation tool provides a user-friendly interface for translating Xenobla
 - 🖥️ Quick access to file directories
 - 💡 Smart unsaved changes detection
 - 🔍 Enhanced search capabilities
+- ⚡ Character counter for each new line separated by \n
+- 💡 Lines exceeding the allowed character limit are colored in red
 
 ## 📋 Requirements
 
