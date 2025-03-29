@@ -1,8 +1,8 @@
-# 🌐 Xenoblade 2 BDAT Translation Tool
+# 🌐 Xenoblade BDAT Translation Tool
 
 <div align="center">
 
-*A GUI tool for translating Xenoblade 2 BDAT files*
+*A GUI tool for translating Xenoblade BDAT files (compatibe with all Xenoblade games released on Nintendo Switch)*
 
 [![Made with Python](https://img.shields.io/badge/Made%20with-Python-1f425f.svg)](https://www.python.org/)
 [![For Xenoblade 2](https://img.shields.io/badge/For-Xenoblade%202-red.svg)](https://www.nintendo.com/games/detail/xenoblade-chronicles-2-switch/)
@@ -13,11 +13,11 @@
 
 This translation tool provides a user-friendly interface for translating Xenoblade 2 extracted BDAT files. It's designed to work with BDAT files that have been extracted using the [BDAT Batch Extract/Unpack GUI Tool](https://github.com/rsc-pl/Xenoblade2-BDAT-Batch-Extract-Unpack-GUI).
 
-![Screen](graphics/GUI.jpg)
-![Screen](graphics/GUI2.jpg)
+![Screen](graphics/GUI.png)
 
 ## ✨ Features
 
+- 📝 Compatibe with all Xenoblade games released on Nintendo Switch
 - 🔍 Easy navigation through BDAT folders and files
 - 📝 Side-by-side original text and translation editing
 - 🎨 Translation progress tracking with color coding
