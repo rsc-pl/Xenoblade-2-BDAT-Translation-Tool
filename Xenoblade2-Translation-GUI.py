@@ -1,11 +1,12 @@
-import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+import ttkbootstrap as tk
+from ttkbootstrap import ttk, Style
+from tkinter import filedialog, messagebox
 import json
 import os
 import threading
 import shutil
 import configparser
-from tkinter import font
+from tkinter import font  # Keep this for now, might be needed for text height calculation
 import re
 import atexit
 
@@ -19,6 +20,7 @@ CURRENT_JSON_DATA = None
 CURRENT_ORIGINAL_JSON_DATA = None  # Original language data
 TREE = None  # global tree variable
 UNSAVED_CHANGES = False
+GAME_VERSION = None  # 'Xenoblade2' or 'Xenoblade3'
 
 # --- Helper Functions ---
 def load_json(filepath):
@@ -38,7 +40,13 @@ def save_json(filepath, data):
 
         for row in data_copy['rows']:
             if 'edited_text' in row:
-                row['name'] = row['edited_text']
+                if GAME_VERSION == "Xenoblade3":
+                    # For XB3, find the text field (type 7 in schema)
+                    text_field = next((field['name'] for field in data_copy.get('schema', []) if field.get('type') == 7), None)
+                    if text_field:
+                        row[text_field] = row['edited_text']
+                else:
+                    row['name'] = row['edited_text']
                 del row['edited_text']  # Remove the 'edited_text' field after saving
 
         with open(filepath, 'w', encoding='utf-8') as f:
@@ -52,29 +60,29 @@ def show_character_counts(text_widget):
     # Get the text and split by newlines
     text = text_widget.get("1.0", "end-1c")
     lines = text.split('\\n')
-    
+
     # Create a tooltip window
     tooltip = tk.Toplevel(text_widget)
     tooltip.wm_overrideredirect(True)
     tooltip.wm_geometry("+%d+%d" % (text_widget.winfo_rootx(), text_widget.winfo_rooty() - 70))
-    
+
     # Create labels for each line count
     for i, line in enumerate(lines):
         count = len(line)
-        label = tk.Label(tooltip, text=f"Line {i+1}: {count} chars", bg="yellow", fg="black")
+        label = ttk.Label(tooltip, text=f"Line {i+1}: {count} chars", background="#FFFFE0")  # Light yellow background
         label.pack()
-    
+
     # Update position when text widget moves
     def update_position():
         tooltip.wm_geometry("+%d+%d" % (text_widget.winfo_rootx(), text_widget.winfo_rooty() - 70))
         tooltip.after(100, update_position)
-    
+
     update_position()
-    
+
     # Destroy tooltip when text widget loses focus
     def destroy_tooltip(event=None):
         tooltip.destroy()
-    
+
     text_widget.bind('<FocusOut>', destroy_tooltip)
     return tooltip
 
@@ -85,7 +93,7 @@ def check_line_length(filename, text):
         return False
 
     if filename.startswith("bf"):
-        limit = 56
+        limit = 55
     elif filename.startswith("campfev") or filename.startswith("fev") or filename.startswith("kizuna") or filename.startswith("qst") or filename.startswith("tlk"):
         limit = 41
     else:
@@ -101,13 +109,25 @@ def check_line_length(filename, text):
 
 def calculate_text_height(text, font, width):
     """Calculates the height of the text based on the font and width."""
-    text_widget = tk.Text(root, font=font, wrap=tk.WORD, width=width)
+    text_widget = tk.Text(root, font=font, width=width)
     text_widget.insert("1.0", text)
     text_widget.update_idletasks()  # Force update of the widget
-    bbox = text_widget.bbox("end")
-    height = bbox[3] if bbox else 20  # Default height if bbox is None
+    
+    # Calculate total height needed
+    total_lines = 1
+    for line in text.split('\\n'):
+        text_widget.delete("1.0", "end")
+        text_widget.insert("1.0", line)
+        text_widget.update_idletasks()
+        bbox = text_widget.bbox("end")
+        if bbox:
+            total_lines += bbox[1] // bbox[3] if bbox[3] > 0 else 1
+    
+    line_height = font.metrics("linespace")
+    height = total_lines * line_height
+    
     text_widget.destroy()
-    return height + 10  # Add extra padding to make rows taller
+    return height + 10  # Add extra padding
 
 def populate_table(tree, original_data, translated_data):
     """Populates the Treeview table with JSON data from both original and translated files."""
@@ -124,6 +144,9 @@ def populate_table(tree, original_data, translated_data):
         #text = text.replace('[', ' [ ').replace(']', ' ] ')
         return text
 
+    # Use the configured DataTable.Treeview style
+    TREE.configure(style='DataTable.Treeview')
+
     # Use translated data if available, otherwise use original
     data = translated_data if translated_data else original_data
     
@@ -132,10 +155,20 @@ def populate_table(tree, original_data, translated_data):
             # Get original text if available
             original_text = ""
             if original_data and 'rows' in original_data and len(original_data['rows']) > idx:
-                original_text = original_data['rows'][idx].get('name', '')
+                if GAME_VERSION == "Xenoblade3":
+                    # For XB3, find the text field (type 7 in schema)
+                    text_field = next((field['name'] for field in original_data.get('schema', []) if field.get('type') == 7), None)
+                    original_text = original_data['rows'][idx].get(text_field, '') if text_field else ''
+                else:
+                    original_text = original_data['rows'][idx].get('name', '')
             
             # Get translated text
-            translated_text = row.get('name', '')
+            if GAME_VERSION == "Xenoblade3":
+                # For XB3, find the text field (type 7 in schema)
+                text_field = next((field['name'] for field in data.get('schema', []) if field.get('type') == 7), None)
+                translated_text = row.get(text_field, '') if text_field else ''
+            else:
+                translated_text = row.get('name', '')
 
             item_id = tree.insert("", "end", values=(
                 row.get('$id', ''),
@@ -152,12 +185,13 @@ def populate_table(tree, original_data, translated_data):
 
             # Calculate text height for the "EDITED TEXT" column
             text = row.get('name', '')
-            font_style = font.Font(family="Calibri", size=12)
+            font_size = font_size_var.get()
             width = 200 // 7
-            height = calculate_text_height(text, font_style, width)
-
-            s = ttk.Style()
-            s.configure('Treeview', rowheight=int(height + 15))
+            if root.winfo_exists():  # Only calculate height if root window exists
+                font_style = font.Font(family="Calibri", size=font_size)
+                height = calculate_text_height(text, font_style, width)
+                s = ttk.Style()
+                s.configure('Treeview', rowheight=int(height + 15))
 
 # --- GUI Functions ---
 
@@ -185,6 +219,9 @@ def filter_folders(event=None):
     """Filters folders based on search text."""
     search_text = search_var.get().lower()
     
+    if not ORIGINAL_FILE_LIST:
+        return
+        
     # Clear the current view
     for item in file_list.get_children():
         file_list.delete(item)
@@ -196,68 +233,138 @@ def filter_folders(event=None):
         
         # If folder matches or any child matches, show it
         if folder_matches or any(search_text in child['text'].lower() for child in folder['children']):
+            # Check if folder has a color tag
+            folder_tags = ()
+            if folder['text'] in FOLDER_STATUS:
+                folder_tags = (FOLDER_STATUS[folder['text']],)
+            
             # Recreate the folder item
             folder_id = file_list.insert("", "end", 
                 text=folder['text'], 
                 values=folder['values'],
-                tags=folder.get('tags', ())
+                tags=folder_tags
             )
             
             # Add matching children
             for child in folder['children']:
                 if not search_text or search_text in child['text'].lower():
-                    child_id = file_list.insert(folder_id, "end", 
-                        text=child['text'], 
-                        values=child['values']
-                    )
-                    # Apply color to child if it's in FOLDER_STATUS
+                    # Check if child has a color tag
+                    child_tags = ()
                     rel_path = child['values'][1].replace(BASE_DIR + '\\', '').replace('\\', '/')
                     if rel_path in FOLDER_STATUS:
-                        file_list.item(child_id, tags=(FOLDER_STATUS[rel_path],))
+                        child_tags = (FOLDER_STATUS[rel_path],)
+                    
+                    child_id = file_list.insert(folder_id, "end", 
+                        text=child['text'], 
+                        values=child['values'],
+                        tags=child_tags
+                    )
+
+def detect_game_version(base_dir):
+    """Detects whether this is Xenoblade 2 or 3 based on folder structure and bschema files."""
+    # Check for Xenoblade 3 structure (has game/ and evt/ folders)
+    game_path = os.path.join(base_dir, "game")
+    evt_path = os.path.join(base_dir, "evt")
+    
+    if os.path.exists(game_path) and os.path.exists(evt_path):
+        # Found Xenoblade 3 structure
+        root.title("BDAT Translation Tool [X3]")
+        return "Xenoblade3"
+    
+    # Check for Xenoblade 2 structure (direct bdat folders)
+    for item in os.listdir(base_dir):
+        item_path = os.path.join(base_dir, item)
+        if os.path.isdir(item_path):
+            # Check for bschema file
+            bschema_path = os.path.join(item_path, f"{item}.bschema")
+            if os.path.exists(bschema_path):
+                try:
+                    with open(bschema_path, 'r') as f:
+                        bschema = json.load(f)
+                        if "version" in bschema and isinstance(bschema["version"], dict) and "Legacy" in bschema["version"]:
+                            root.title("BDAT Translation Tool [X2]")
+                            return "Xenoblade2"
+                        elif "version" in bschema and bschema["version"] == "Modern":
+                            root.title("BDAT Translation Tool [X3]")
+                            return "Xenoblade3"
+                except:
+                    continue
+    root.title("BDAT Translation Tool [X2]")
+    return "Xenoblade2"  # Default to XB2 if unsure
 
 def populate_file_list():
     """Populates the file list with BDAT folders and JSON files."""
-    global ORIGINAL_FILE_LIST
+    global ORIGINAL_FILE_LIST, GAME_VERSION
     # Clear existing list
     for item in file_list.get_children():
         file_list.delete(item)
 
     if BASE_DIR:
         ORIGINAL_FILE_LIST = []  # Reset the original list
+        GAME_VERSION = detect_game_version(BASE_DIR)
 
-        for bdat_folder in os.listdir(BASE_DIR):
-            bdat_folder_path = os.path.join(BASE_DIR, bdat_folder)
-            if os.path.isdir(bdat_folder_path):
-                folder_id = file_list.insert("", "end", text=bdat_folder, values=("folder", bdat_folder_path))  # Store folder path
-                # Store in original list
-                ORIGINAL_FILE_LIST.append({
-                    'id': folder_id,
-                    'text': bdat_folder,
-                    'values': ("folder", bdat_folder_path),
-                    'children': []
-                })
-                
-                # Apply background color based on config
-                if bdat_folder in FOLDER_STATUS:
-                    file_list.item(folder_id, tags=(FOLDER_STATUS[bdat_folder],))
+        if GAME_VERSION == "Xenoblade3":
+            # Xenoblade 3 has game/ and evt/ folders
+            for top_folder in ["game", "evt"]:
+                top_folder_path = os.path.join(BASE_DIR, top_folder)
+                if os.path.exists(top_folder_path):
+                    for bdat_folder in os.listdir(top_folder_path):
+                        bdat_folder_path = os.path.join(top_folder_path, bdat_folder)
+                        if os.path.isdir(bdat_folder_path):
+                            folder_id = file_list.insert("", "end", text=f"{top_folder}/{bdat_folder}", values=("folder", bdat_folder_path))
+                            ORIGINAL_FILE_LIST.append({
+                                'id': folder_id,
+                                'text': f"{top_folder}/{bdat_folder}",
+                                'values': ("folder", bdat_folder_path),
+                                'children': []
+                            })
+                            
+                            if bdat_folder in FOLDER_STATUS:
+                                file_list.item(folder_id, tags=(FOLDER_STATUS[bdat_folder],))
 
-                inner_folder_path = os.path.join(bdat_folder_path, bdat_folder)
-                if os.path.isdir(inner_folder_path):
-                    json_files = [f for f in os.listdir(inner_folder_path) if f.endswith(".json")]
-                    for json_file in json_files:
-                        json_path = os.path.join(inner_folder_path, json_file)
-                        child_id = file_list.insert(folder_id, "end", text=json_file, values=("file", json_path))  # Store JSON path
-                        # Store in original list
-                        ORIGINAL_FILE_LIST[-1]['children'].append({
-                            'id': child_id,
-                            'text': json_file,
-                            'values': ("file", json_path)
-                        })
+                            inner_folder_path = os.path.join(bdat_folder_path, bdat_folder)
+                            if os.path.isdir(inner_folder_path):
+                                json_files = [f for f in os.listdir(inner_folder_path) if f.endswith(".json")]
+                                for json_file in json_files:
+                                    json_path = os.path.join(inner_folder_path, json_file)
+                                    child_id = file_list.insert(folder_id, "end", text=json_file, values=("file", json_path))
+                                    ORIGINAL_FILE_LIST[-1]['children'].append({
+                                        'id': child_id,
+                                        'text': json_file,
+                                        'values': ("file", json_path)
+                                    })
+        else:
+            # Xenoblade 2 has direct bdat folders
+            for bdat_folder in os.listdir(BASE_DIR):
+                bdat_folder_path = os.path.join(BASE_DIR, bdat_folder)
+                if os.path.isdir(bdat_folder_path):
+                    folder_id = file_list.insert("", "end", text=bdat_folder, values=("folder", bdat_folder_path))
+                    ORIGINAL_FILE_LIST.append({
+                        'id': folder_id,
+                        'text': bdat_folder,
+                        'values': ("folder", bdat_folder_path),
+                        'children': []
+                    })
+                    
+                    if bdat_folder in FOLDER_STATUS:
+                        file_list.item(folder_id, tags=(FOLDER_STATUS[bdat_folder],))
+
+                    inner_folder_path = os.path.join(bdat_folder_path, bdat_folder)
+                    if os.path.isdir(inner_folder_path):
+                        json_files = [f for f in os.listdir(inner_folder_path) if f.endswith(".json")]
+                        for json_file in json_files:
+                            json_path = os.path.join(inner_folder_path, json_file)
+                            child_id = file_list.insert(folder_id, "end", text=json_file, values=("file", json_path))
+                            ORIGINAL_FILE_LIST[-1]['children'].append({
+                                'id': child_id,
+                                'text': json_file,
+                                'values': ("file", json_path)
+                            })
 
 
 def load_table_data(json_path):
     """Loads the selected JSON file into the table."""
-    global CURRENT_JSON_PATH, CURRENT_JSON_DATA, CURRENT_ORIGINAL_JSON_PATH, CURRENT_ORIGINAL_JSON_DATA
+    global CURRENT_JSON_PATH, CURRENT_JSON_DATA, CURRENT_ORIGINAL_JSON_PATH, CURRENT_ORIGINAL_JSON_DATA, GAME_VERSION
 
     CURRENT_JSON_PATH = json_path
     CURRENT_JSON_DATA = load_json(CURRENT_JSON_PATH)
@@ -272,6 +379,16 @@ def load_table_data(json_path):
         if os.path.exists(original_path):
             CURRENT_ORIGINAL_JSON_PATH = original_path
             CURRENT_ORIGINAL_JSON_DATA = load_json(original_path)
+        elif GAME_VERSION == "Xenoblade3":
+            # For XB3, also check if the file exists in the other top-level folder (game/evt)
+            parts = rel_path.split(os.sep)
+            if len(parts) > 1 and parts[0] in ["game", "evt"]:
+                # Try the opposite folder
+                opposite_folder = "evt" if parts[0] == "game" else "game"
+                opposite_path = os.path.join(SECOND_BASE_DIR, opposite_folder, *parts[1:])
+                if os.path.exists(opposite_path):
+                    CURRENT_ORIGINAL_JSON_PATH = opposite_path
+                    CURRENT_ORIGINAL_JSON_DATA = load_json(opposite_path)
     
     if CURRENT_JSON_DATA:
         populate_table(TREE, CURRENT_ORIGINAL_JSON_DATA, CURRENT_JSON_DATA)
@@ -318,12 +435,26 @@ def save_table_data():
 
     # Get data from the treeview
     for index, item in enumerate(TREE.get_children()):
-        edited_text = TREE.item(item)['values'][3]  # Get the value from the translated text column
-        # Convert visible special characters back to actual characters
-        if edited_text:
-            edited_text = edited_text.replace('\\n', '\n').replace('\\t', '\t').replace('\\r', '\r')
-        if CURRENT_JSON_DATA and 'rows' in CURRENT_JSON_DATA and len(CURRENT_JSON_DATA['rows']) > index:
-            CURRENT_JSON_DATA['rows'][index]['edited_text'] = edited_text
+        try:
+            edited_text = TREE.item(item)['values'][3]  # Get the value from the translated text column
+            # Convert visible special characters back to actual characters
+            if edited_text is not None:
+                if not isinstance(edited_text, str):
+                    print(f"Problem in row {index}: Found non-string value (type={type(edited_text)}), converting to string. Content={repr(edited_text)}")  # Debug output
+                    edited_text = str(edited_text)
+                edited_text = edited_text.replace('\\n', '\n').replace('\\t', '\t').replace('\\r', '\r')
+            
+            if CURRENT_JSON_DATA and 'rows' in CURRENT_JSON_DATA and len(CURRENT_JSON_DATA['rows']) > index:
+                if GAME_VERSION == "Xenoblade3":
+                    # For XB3, find the text field (type 7 in schema)
+                    text_field = next((field['name'] for field in CURRENT_JSON_DATA.get('schema', []) if field.get('type') == 7), None)
+                    if text_field:
+                        CURRENT_JSON_DATA['rows'][index]['edited_text'] = edited_text
+                else:
+                    CURRENT_JSON_DATA['rows'][index]['edited_text'] = edited_text
+        except Exception as e:
+            print(f"Error in row {index}: {str(e)}. Value type={type(edited_text)}, Content={repr(edited_text)}")  # Debug output
+            raise  # Re-raise the exception after logging it
 
     save_json(CURRENT_JSON_PATH, CURRENT_JSON_DATA)
     UNSAVED_CHANGES = False  # Reset the flag after saving
@@ -364,11 +495,24 @@ def edit_cell(event):
             value = TREE.item(item, 'values')[column_id]
 
             # Create a text widget for multiline editing
-            text_widget = tk.Text(TREE, wrap=tk.WORD, width=width//7, height=4)
+            font_size = font_size_var.get()
+            font_style = font.Font(family="Calibri", size=font_size)
+            # Calculate needed height based on text content
+            text_height = calculate_text_height(value, font_style, width)
+            height = max(text_height // 20, 4)  # Convert pixels to lines, minimum 4 lines
+            
+            # Create text widget with proper sizing
+            text_widget = tk.Text(TREE, 
+                                width=width//7, 
+                                height=height, 
+                                background="#FFFFE0", 
+                                font=font_style,
+                                wrap=tk.WORD)  # Enable word wrapping
             # Display escaped special characters for editing
             edit_value = value.replace('\n', '\\n')
             text_widget.insert("1.0", edit_value)
-            text_widget.place(x=x, y=y, width=width, height=height)
+            # Ensure the edit window is visible and properly sized
+            text_widget.place(x=x, y=y, width=max(width, 100), height=max(height*20, 80))  # Minimum reasonable sizes
             text_widget.focus()
 
             # Show character counts
@@ -394,10 +538,11 @@ def edit_cell(event):
                         TREE.item(item, tags=())  # Remove the tag if it exists
 
                 # Update row height
-                font_style = font.Font(family="Calibri", size=12)
-                new_height = calculate_text_height(formatted_value, font_style, width//7)
+                font_size = font_size_var.get()
+                font_style = font.Font(family="Calibri", size=font_size)
+                height = calculate_text_height(formatted_value, font_style, width//7)
                 s = ttk.Style()
-                s.configure('Treeview', rowheight=int(new_height + 15))
+                s.configure('Treeview', rowheight=int(height + 15))
                 
                 text_widget.destroy()
                 tooltip.destroy()
@@ -420,11 +565,29 @@ def edit_cell(event):
                 try:
                     # Update the tooltip with new counts
                     text = text_widget.get("1.0", "end-1c")
-                    lines = text.split('\\n')
-                    for i, label in enumerate(tooltip.winfo_children()):
-                        if i < len(lines):
-                            count = len(lines[i])
-                            label.config(text=f"Line {i+1}: {count} chars")
+                    # Split by actual newlines (from pressing Enter) and properly escaped \n
+                    lines = []
+                    temp_lines = []
+                    # First split by actual newlines
+                    for part in text.split('\n'):
+                        # Then split by properly escaped \n (not just backslash)
+                        temp_lines.extend(part.split('\\n'))
+                    
+                    # Now properly handle the split parts
+                    for line in temp_lines:
+                        # Only add non-empty lines
+                        if line.strip():
+                            lines.append(line)
+                    
+                    # Clear existing labels and create new ones
+                    for child in tooltip.winfo_children():
+                        child.destroy()
+                    
+                    # Create new labels for each line
+                    for i, line in enumerate(lines):
+                        count = len(line)
+                        label = ttk.Label(tooltip, text=f"Line {i+1}: {count} chars", background="#FFFFE0")
+                        label.pack()
                 except:
                     pass
                 return True
@@ -492,33 +655,12 @@ def load_config():
         item_path = file_list.item(item, 'values')[1]
         item_type = file_list.item(item, 'values')[0]
 
-        if item_type == "folder":
-            # For folders, check by name
-            if item_text in FOLDER_STATUS:
-                file_list.item(item, tags=(FOLDER_STATUS[item_text],))
-            # Apply colors to child files as well
-            for child in file_list.get_children(item):
-                child_text = file_list.item(child, 'text')
-                child_path = file_list.item(child, 'values')[1]
-                # Get the BDAT folder name (parent folder)
-                bdat_folder = os.path.basename(os.path.dirname(os.path.dirname(child_path)))
-                # Get relative path within BDAT folder
-                rel_path = os.path.relpath(child_path, os.path.join(BASE_DIR, bdat_folder))
-                # Convert to forward slashes for consistency
-                key = rel_path.replace('\\', '/')
-                if key in FOLDER_STATUS:
-                    file_list.item(child, tags=(FOLDER_STATUS[key],))
+        # Get relative path from BASE_DIR
+        rel_path = os.path.relpath(item_path, BASE_DIR)
+        key = rel_path.replace('\\', '/')
 
-        elif item_type == "file":
-            # For files, check by relative path
-            # Get the BDAT folder name (parent folder)
-            bdat_folder = os.path.basename(os.path.dirname(os.path.dirname(item_path)))
-            # Get relative path within BDAT folder
-            rel_path = os.path.relpath(item_path, os.path.join(BASE_DIR, bdat_folder))
-            # Convert to forward slashes for consistency
-            key = rel_path.replace('\\', '/')
-            if key in FOLDER_STATUS:
-                file_list.item(item, tags=(FOLDER_STATUS[key],))
+        if key in FOLDER_STATUS:
+            file_list.item(item, tags=(FOLDER_STATUS[key],))
 
 def save_config():
     """Saves the folder status to the config file."""
@@ -581,12 +723,21 @@ def load_gui_state():
     print(f"Config file path: {config_path}")
 
 # --- GUI Setup ---
-
-root = tk.Tk()
+root = tk.Window(themename='flatly')
 root.title("BDAT Translation Tool")
+# Set default font size for the application
+default_font = ('Calibri', 12)
+root.option_add('*Font', default_font)
+root.option_add('*TCombobox*Font', default_font)
+root.option_add('*TEntry*Font', default_font)
+root.option_add('*TLabel*Font', default_font)
 
 # Call save_gui_state when the window is closed
 root.protocol("WM_DELETE_WINDOW", lambda: [save_gui_state(), root.destroy()])
+
+# Ensure we only have one window
+root.withdraw()
+root.deiconify()
 
 # --- Top Frame (Directory/File Navigation and Buttons) ---
 top_frame = ttk.Frame(root, padding=10)
@@ -603,6 +754,31 @@ search_var = tk.StringVar()
 search_entry = ttk.Entry(search_frame, textvariable=search_var, width=20)
 search_entry.pack(side=tk.LEFT, padx=5)
 search_entry.bind('<KeyRelease>', filter_folders)
+
+def update_font_size(event=None):
+    """Updates the font size and repopulates the table."""
+    font_size = font_size_var.get()
+    if root.winfo_exists():  # Only update if root window exists
+        # Update the data table style
+        style = ttk.Style()
+        style.configure('DataTable.Treeview', font=('Calibri', font_size))
+        
+        # Calculate and set new row height
+        font_style = font.Font(family="Calibri", size=font_size)
+        new_height = calculate_text_height("Sample Text", font_style, 200//7)
+        style.configure('DataTable.Treeview', rowheight=int(new_height + 15))
+        
+        # Apply the style to the treeview
+        TREE.configure(style='DataTable.Treeview')
+        
+        # Force refresh of the treeview
+        TREE.update_idletasks()
+        
+        # Repopulate table if data is loaded
+        if CURRENT_JSON_PATH and CURRENT_ORIGINAL_JSON_DATA and CURRENT_JSON_DATA:
+            populate_table(TREE, CURRENT_ORIGINAL_JSON_DATA, CURRENT_JSON_DATA)
+
+
 
 base_dir_button = ttk.Button(top_frame, text="Select Base Dir", command=browse_base_dir)
 base_dir_button.pack(side=tk.LEFT, padx=5, pady=5)
@@ -631,7 +807,7 @@ file_list_frame.pack(fill=tk.BOTH, expand=True)
 file_list_scrollbar = ttk.Scrollbar(file_list_frame)
 file_list_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-file_list = ttk.Treeview(file_list_frame, columns=("Type", "Path"), yscrollcommand=file_list_scrollbar.set)
+file_list = ttk.Treeview(file_list_frame, columns=("Type", "Path"), yscrollcommand=file_list_scrollbar.set, style='FileList.Treeview')
 file_list.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 file_list.heading("#0", text="Folders/Files", anchor=tk.W)
 file_list.heading("Type", text="Type")
@@ -706,6 +882,11 @@ file_list.bind("<Button-3>", show_context_menu)
 
 file_list_scrollbar.config(command=file_list.yview)
 
+# Configure styles with consistent font sizes
+style = ttk.Style()
+style.configure('FileList.Treeview', font=('Calibri', 12, 'bold'))  # Bold style for file list
+style.configure('DataTable.Treeview', font=('Calibri', 12))  # Regular style for data table
+
 # --- Define tags for background colors ---
 file_list.tag_configure("green", background="green")
 file_list.tag_configure("orange", background="orange")
@@ -719,36 +900,50 @@ paned_window.add(right_frame)
 button_frame = ttk.Frame(right_frame)
 button_frame.pack(side=tk.TOP, fill=tk.X, padx=5, pady=5)
 
-save_button = ttk.Button(button_frame, text="Save", command=save_table_data)
+save_button = ttk.Button(button_frame, text="Save", command=save_table_data, bootstyle="primary")
 save_button.pack(side=tk.LEFT, padx=5, pady=5)
 
-undo_button = ttk.Button(button_frame, text="Undo", command=undo_changes)
+undo_button = ttk.Button(button_frame, text="Undo", command=undo_changes, bootstyle="warning")
 undo_button.pack(side=tk.LEFT, padx=5, pady=5)
 
-mark_green_button = ttk.Button(button_frame, text="Mark Green", command=lambda: mark_folder("green"))
+# Font Size Selection
+font_size_label = ttk.Label(button_frame, text="Font Size:")
+font_size_label.pack(side=tk.LEFT, padx=(10,0))
+
+font_size_var = tk.IntVar(value=12)  # Default font size
+font_size_combo = ttk.Combobox(button_frame, textvariable=font_size_var, values=[8, 10, 12, 14, 16], width=3)
+font_size_combo.pack(side=tk.LEFT, padx=5)
+font_size_combo.bind("<<ComboboxSelected>>", update_font_size)
+
+mark_green_button = ttk.Button(button_frame, text="Mark Green", command=lambda: mark_folder("green"), bootstyle="success")
 mark_green_button.pack(side=tk.LEFT, padx=5, pady=5)
 
-mark_orange_button = ttk.Button(button_frame, text="Mark Orange", command=lambda: mark_folder("orange"))
+mark_orange_button = ttk.Button(button_frame, text="Mark Orange", command=lambda: mark_folder("orange"), bootstyle="warning")
 mark_orange_button.pack(side=tk.LEFT, padx=5, pady=5)
 
-clear_color_button = ttk.Button(button_frame, text="Clear Color", command=lambda: mark_folder(None))
+clear_color_button = ttk.Button(button_frame, text="Clear Color", command=lambda: mark_folder(None), bootstyle="secondary")
 clear_color_button.pack(side=tk.LEFT, padx=5, pady=5)
 
 # --- Treeview Table ---
-s = ttk.Style()
-s.configure('Treeview', rowheight=40)
+style = ttk.Style()
+style.configure('Treeview', rowheight=40)
 
-TREE = ttk.Treeview(right_frame, columns=("ID", "LABEL", "ORIGINAL TEXT", "TRANSLATED TEXT"), show="headings", style='Treeview')
+TREE = ttk.Treeview(
+    right_frame, 
+    columns=("ID", "LABEL", "ORIGINAL TEXT", "TRANSLATED TEXT"), 
+    show="headings", 
+    style='DataTable.Treeview'
+)
 TREE.heading("ID", text="ID")
 TREE.heading("LABEL", text="LABEL")
 TREE.heading("ORIGINAL TEXT", text="ORIGINAL TEXT")
 TREE.heading("TRANSLATED TEXT", text="TRANSLATED TEXT")
 
-# Set column widths
+# Set column widths with stretch for text columns
 TREE.column("ID", width=50, stretch=False)
 TREE.column("LABEL", width=150, stretch=False)
-TREE.column("ORIGINAL TEXT", width=200, anchor=tk.W)
-TREE.column("TRANSLATED TEXT", width=200, anchor=tk.W)  # Allow text wrapping
+TREE.column("ORIGINAL TEXT", width=200, stretch=True, anchor=tk.W)
+TREE.column("TRANSLATED TEXT", width=200, stretch=True, anchor=tk.W)
 
 # Add a Scrollbar to the Treeview Table
 tree_scroll = ttk.Scrollbar(right_frame, orient="vertical", command=TREE.yview)
@@ -826,5 +1021,14 @@ if BASE_DIR:
                 key = rel_path.replace('\\', '/')
                 if key in FOLDER_STATUS:
                     file_list.item(child, tags=(FOLDER_STATUS[key],))
+
+def delayed_populate():
+    # Select the first item in the file list if there are any
+    first_item = file_list.get_children()
+    if first_item:
+        file_list.selection_set(first_item[0])
+        file_list.event_generate("<<TreeviewSelect>>")  # Trigger the select event
+
+root.after(100, delayed_populate)  # Delay the population
 
 root.mainloop()
