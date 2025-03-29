@@ -40,13 +40,9 @@ def save_json(filepath, data):
 
         for row in data_copy['rows']:
             if 'edited_text' in row:
-                if GAME_VERSION == "Xenoblade3":
-                    # For XB3, find the text field (type 7 in schema)
-                    text_field = next((field['name'] for field in data_copy.get('schema', []) if field.get('type') == 7), None)
-                    if text_field:
-                        row[text_field] = row['edited_text']
-                else:
-                    row['name'] = row['edited_text']
+                # Save to last field in row
+                last_field = list(row.keys())[-1]
+                row[last_field] = row['edited_text']
                 del row['edited_text']  # Remove the 'edited_text' field after saving
 
         with open(filepath, 'w', encoding='utf-8') as f:
@@ -152,23 +148,14 @@ def populate_table(tree, original_data, translated_data):
     
     if data and 'rows' in data:
         for idx, row in enumerate(data['rows']):
-            # Get original text if available
+            # Get original text if available - always use last field in row
             original_text = ""
             if original_data and 'rows' in original_data and len(original_data['rows']) > idx:
-                if GAME_VERSION == "Xenoblade3":
-                    # For XB3, find the text field (type 7 in schema)
-                    text_field = next((field['name'] for field in original_data.get('schema', []) if field.get('type') == 7), None)
-                    original_text = original_data['rows'][idx].get(text_field, '') if text_field else ''
-                else:
-                    original_text = original_data['rows'][idx].get('name', '')
+                original_row = original_data['rows'][idx]
+                original_text = list(original_row.values())[-1] if original_row else ''
             
-            # Get translated text
-            if GAME_VERSION == "Xenoblade3":
-                # For XB3, find the text field (type 7 in schema)
-                text_field = next((field['name'] for field in data.get('schema', []) if field.get('type') == 7), None)
-                translated_text = row.get(text_field, '') if text_field else ''
-            else:
-                translated_text = row.get('name', '')
+            # Get translated text - always use last field in row
+            translated_text = list(row.values())[-1] if row else ''
 
             item_id = tree.insert("", "end", values=(
                 row.get('$id', ''),
@@ -261,7 +248,7 @@ def filter_folders(event=None):
                     )
 
 def detect_game_version(base_dir):
-    """Detects whether this is Xenoblade 2 or 3 based on folder structure and bschema files."""
+    """Detects whether this is Xenoblade 2, 3 or X based on folder structure and bschema files."""
     # Check for Xenoblade 3 structure (has game/ and evt/ folders)
     game_path = os.path.join(base_dir, "game")
     evt_path = os.path.join(base_dir, "evt")
@@ -271,7 +258,7 @@ def detect_game_version(base_dir):
         root.title("BDAT Translation Tool [X3]")
         return "Xenoblade3"
     
-    # Check for Xenoblade 2 structure (direct bdat folders)
+    # Check for Xenoblade X structure (Modern schema but direct bdat folders)
     for item in os.listdir(base_dir):
         item_path = os.path.join(base_dir, item)
         if os.path.isdir(item_path):
@@ -285,8 +272,13 @@ def detect_game_version(base_dir):
                             root.title("BDAT Translation Tool [X2]")
                             return "Xenoblade2"
                         elif "version" in bschema and bschema["version"] == "Modern":
-                            root.title("BDAT Translation Tool [X3]")
-                            return "Xenoblade3"
+                            # Check if this is X or 3 by looking for game/evt folders
+                            if not os.path.exists(game_path) and not os.path.exists(evt_path):
+                                root.title("BDAT Translation Tool [X]")
+                                return "XenobladeX"
+                            else:
+                                root.title("BDAT Translation Tool [X3]")
+                                return "Xenoblade3"
                 except:
                     continue
     root.title("BDAT Translation Tool [X2]")
@@ -299,9 +291,13 @@ def populate_file_list():
     for item in file_list.get_children():
         file_list.delete(item)
 
-    if BASE_DIR:
+    if BASE_DIR and os.path.exists(BASE_DIR):
         ORIGINAL_FILE_LIST = []  # Reset the original list
-        GAME_VERSION = detect_game_version(BASE_DIR)
+        try:
+            GAME_VERSION = detect_game_version(BASE_DIR)
+        except Exception as e:
+            messagebox.showerror("Error", f"Could not detect game version: {str(e)}")
+            return
 
         if GAME_VERSION == "Xenoblade3":
             # Xenoblade 3 has game/ and evt/ folders
@@ -379,7 +375,7 @@ def load_table_data(json_path):
         if os.path.exists(original_path):
             CURRENT_ORIGINAL_JSON_PATH = original_path
             CURRENT_ORIGINAL_JSON_DATA = load_json(original_path)
-        elif GAME_VERSION == "Xenoblade3":
+        elif GAME_VERSION in ["Xenoblade3", "XenobladeX"]:
             # For XB3, also check if the file exists in the other top-level folder (game/evt)
             parts = rel_path.split(os.sep)
             if len(parts) > 1 and parts[0] in ["game", "evt"]:
@@ -445,13 +441,10 @@ def save_table_data():
                 edited_text = edited_text.replace('\\n', '\n').replace('\\t', '\t').replace('\\r', '\r')
             
             if CURRENT_JSON_DATA and 'rows' in CURRENT_JSON_DATA and len(CURRENT_JSON_DATA['rows']) > index:
-                if GAME_VERSION == "Xenoblade3":
-                    # For XB3, find the text field (type 7 in schema)
-                    text_field = next((field['name'] for field in CURRENT_JSON_DATA.get('schema', []) if field.get('type') == 7), None)
-                    if text_field:
-                        CURRENT_JSON_DATA['rows'][index]['edited_text'] = edited_text
-                else:
-                    CURRENT_JSON_DATA['rows'][index]['edited_text'] = edited_text
+                # Save to last field in row
+                row = CURRENT_JSON_DATA['rows'][index]
+                last_field = list(row.keys())[-1]
+                row['edited_text'] = edited_text
         except Exception as e:
             print(f"Error in row {index}: {str(e)}. Value type={type(edited_text)}, Content={repr(edited_text)}")  # Debug output
             raise  # Re-raise the exception after logging it
@@ -708,15 +701,22 @@ def load_gui_state():
             BASE_DIR = config['GUI_STATE'].get('base_dir', "").strip('"')
             SECOND_BASE_DIR = config['GUI_STATE'].get('second_base_dir', "").strip('"')
 
-            print(f"Loaded BASE_DIR: {BASE_DIR}")
-            print(f"Loaded SECOND_BASE_DIR: {SECOND_BASE_DIR}")
-
-            # Update the labels
-            if BASE_DIR:
+            # Normalize paths and ensure they exist
+            if BASE_DIR and os.path.exists(BASE_DIR):
+                BASE_DIR = os.path.normpath(BASE_DIR)
+                print(f"Loaded BASE_DIR: {BASE_DIR}")
                 base_dir_label.config(text=f"Base Directory: {BASE_DIR}")
-                populate_file_list()
-            if SECOND_BASE_DIR:
+            else:
+                BASE_DIR = None
+                print("BASE_DIR path does not exist or is invalid")
+
+            if SECOND_BASE_DIR and os.path.exists(SECOND_BASE_DIR):
+                SECOND_BASE_DIR = os.path.normpath(SECOND_BASE_DIR)
+                print(f"Loaded SECOND_BASE_DIR: {SECOND_BASE_DIR}")
                 second_base_dir_label.config(text=f"Second Directory: {SECOND_BASE_DIR}")
+            else:
+                SECOND_BASE_DIR = None
+                print("SECOND_BASE_DIR path does not exist or is invalid")
 
     except Exception as e:
         print(f"Error loading GUI state: {e}")
